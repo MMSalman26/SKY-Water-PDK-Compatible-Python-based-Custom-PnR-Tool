@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pnr-tool"
+version = "0.1.0"
+description = "SkyWater SKY130-compatible Python place-and-route benchmarking tool"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+  "numpy==2.2.6",
+  "scipy==1.15.3",
+  "networkx==3.4.2",
+  "matplotlib==3.10.3",
+  "rtree==1.4.0",
+  "PyYAML==6.0.2",
+]
+
+[project.scripts]
+pnr-tool = "pnr_tool.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["pnr_tool*"]

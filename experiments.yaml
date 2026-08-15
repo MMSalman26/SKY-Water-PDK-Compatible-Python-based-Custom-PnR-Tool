@@ -1,0 +1,15 @@
+seed: 42
+designs:
+  - netlist: tests/fixtures/golden_three_cell.v
+    clock_period_ns: 10
+  - netlist: tests/fixtures/golden_seq.v
+    clock_period_ns: 10
+algorithms:
+  - name: baseline
+    placement: default
+    clock_opt: default
+    routing: default
+  - name: dummy_place
+    placement: tests.plugins.dummy_placement:DummyPlacement
+    clock_opt: default
+    routing: default

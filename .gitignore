@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# PDK / liberty cache (downloaded by `python -m pnr_tool fetch-pdk`)
+pnr_tool/data/
+
+# Pipeline outputs (QoR, CIF, SPEF, SPICE, layouts, checkpoints)
+runs/
+checkpoints/
+*.pkl
+*.qor.json
+*.cif
+*.spef
+*_ir.sp
+layout_*.png
+layout_view*.json
+
+# Generated medium fixture (optional; recreate with scripts/generate_medium_netlist.py)
+tests/fixtures/medium_design.v
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+*.swp

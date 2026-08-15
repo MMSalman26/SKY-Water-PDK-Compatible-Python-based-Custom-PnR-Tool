@@ -1,0 +1,30 @@
+SkyWater-compatible Python PnR tool
+Copyright 2026 MMSalman26 and contributors
+
+This product includes original Python source under the Apache License 2.0.
+
+It is an in-process QoR ranker inspired by open-source EDA algorithms. It does
+not vendor OpenROAD, OpenSTA, Magic, KLayout, or Cadence Voltus, and it is not
+a signoff replacement for those tools.
+
+Third-party assets fetched or bundled (each keeps its own license):
+
+- SkyWater SKY130 HD standard cells (LEF / liberty JSON)
+  https://github.com/google/skywater-pdk-libs-sky130_fd_sc_hd
+  License: Apache-2.0
+
+- OpenLane configuration snippets (fetched at runtime)
+  https://github.com/The-OpenROAD-Project/OpenLane
+  License: Apache-2.0
+
+- open_pdks reference paths (fetched best-effort)
+  https://github.com/fossi-foundation/open-pdks
+  License: Apache-2.0
+
+- 32-bit ALU gate-level netlist
+  https://github.com/HafizMutahirAhmed/ASIC-ALU-OpenLane
+  See that repository for the netlist license.
+
+- PicoRV32a gate-level netlist (OpenLane-synthesized PicoRV32)
+  RTL: https://github.com/YosysHQ/picorv32 (ISC)
+  Workshop netlist: https://github.com/ABHIMR1502/Digital-SoC-Design

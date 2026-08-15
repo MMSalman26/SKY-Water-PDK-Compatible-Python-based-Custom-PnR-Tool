@@ -1,0 +1,143 @@
+# QoR thresholds (overridable per run)
+thresholds:
+  sta_wns_ps: 0.0          # WNS >= 0 ps at ff corner
+  ir_min_vdd_ratio: 0.95   # node voltage >= 0.95 * VDD
+  drc_max_violations: 0
+
+# STA (OpenSTA-inspired single-corner NLDM + tree Elmore)
+sta:
+  corner: ff              # label; setup uses ss (or scaled ff), hold uses ff
+  setup_ns: 0.05          # fallback if liberty has no constraint
+  hold_ns: 0.02
+  uncertainty_ns: 0.05
+  use_cts_latency: true
+  use_per_sink_cts: true
+  use_crpr: true          # common-path pessimism removal on launch vs capture CTS
+  use_ceff: true          # resistive-shielding Ceff for NLDM load
+  rc_min_scale: 0.72      # early/min interconnect (hold)
+  rc_max_scale: 1.08      # late/max interconnect (setup)
+  wire_model: tree_elmore # tree_elmore | lumped_elmore | d2m
+  sdc_file: null          # optional OpenLane-style SDC (create_clock, I/O, false/MCP)
+  write_spef: true        # reduced SPEF dump for OpenSTA correlation
+
+# DRC (width-aware metal/via QoR; gcell shorts reported separately)
+drc:
+  snap_um: 0.5
+  geometric_shorts: true
+  connectivity_opens: true
+  gcell_shorts: true
+  min_width: true
+  mfg_grid: true
+  pin_enclosure: true
+  via_checks: true
+  same_net_spacing_scale: 0.5
+  write_cif: true
+  pass_on: [overlap, short, open, spacing]
+
+# IR drop (PDNSim-inspired static MNA on planned PDN; not Voltus signoff)
+ir_drop:
+  layers: [met1, met2, met3, met4, met5]
+  grid_pitch_um: 10.0
+  activity_factor: 0.1
+  pdn_sample_um: 2.0
+  external_resistance_ohm: 0.0
+  via_r_ohm: 5.0          # fallback when tech.layers.*.via_r_ohm is missing
+  analyze_vss: true
+  instance_sample: 200   # max rows of instance name + drop % in reports
+  # SkyWater liberty cell_leakage_power is typically nW
+  leakage_unit_w: 1.0e-9
+  corner: tt                 # ff 1.95 / tt 1.8 / ss 1.60; else tech.vdd
+  # Setup-corner IR on ss (1.60 V) is the interesting stress vs tt 1.8 V
+  source_type: straps        # ring | straps | bumps  (straps closer to PDNSim than FULL-ring)
+  bump_n: 4
+  j_max_ma_per_um: 1.0       # SkyWater-ish EM ballpark; ranking signal
+  write_spice: true
+  coupled: false
+  r_tempco: 0.0039
+  temperature_c: null        # null → 100C for ss/ff else 25C
+  use_internal_power: true
+
+# Power planning (VDD/VSS physical grid)
+power:
+  strap_pitch_um: 20.0
+  ring_inset_um: 1.0
+  vdd_layer: met5
+  vss_layer: met4
+  follow_pin_layer: met1
+  ring_width_um: 1.6
+  strap_width_um: 0.8
+  follow_pin_width_um: 0.48
+  width_ref_um: 0.48        # reference width for r_per_um scaling
+
+# Routing (FastRoute-inspired global + pin stubs)
+routing:
+  grid_pitch_um: 2.0
+  step_budget: 50000
+  default_layer: met2
+  # Preferred-direction layer stacks; a gcell edge carries one net per layer.
+  horizontal_layers: [met3, met5, met1]
+  vertical_layers: [met2, met4]
+  congestion_weight: 4.0
+  pin_stubs: true
+  avoid_power: true
+  pattern_routing: true   # L/Z pattern pass before maze
+  overflow_passes: 4      # rip-up & reroute congested nets
+
+# Placement (RePlAce global + OpenDP/Abacus detailed inspired)
+placement:
+  iterations: 60
+  die_utilization: 0.6
+  row_height_um: 2.72   # sky130_fd_sc_hd site height ~2.72 um
+  cell_spacing_um: 0.01
+  seed: 42
+  density_bins: 24
+  wirelength_weight: 1.0
+  density_weight: 0.8
+  density_overflow_power: 2.0
+  nesterov_decay: 0.85
+  max_step_um: 2.0
+  io_pull: 0.01         # pull cells tied to ports toward die edges
+  rect_pull: 0.04       # soft pull toward uniform rectangular slots
+
+# Tapcell insertion (no fillers)
+tap:
+  enable: true
+  cell: sky130_fd_sc_hd__tapvpwrvgnd_1
+  pitch_um: 15.0
+  endcap: true
+
+# Decap insertion after taps (no filler cells)
+decap:
+  enable: true
+  cells:
+    - sky130_fd_sc_hd__decap_12
+    - sky130_fd_sc_hd__decap_8
+    - sky130_fd_sc_hd__decap_4
+  fill_ratio: 0.5
+
+# CTS (TritonCTS-inspired clustering)
+cts:
+  max_fanout: 16
+  max_levels: 10
+  buffer_cell: null     # null → tech.default_clock_buffer
+
+# Reporting
+report:
+  layout_images: true
+  layout_dpi: 110
+  layout_size_in: 8.0
+  layout_max_segments: 200000
+
+# PDK cache (relative to package root unless absolute)
+pdk:
+  cache_dir: data
+  lef_relative: sky130_fd_sc_hd/latest/lef/sky130_fd_sc_hd.tlef
+  # Merged cell LEF pieces live under cells/; fetch pulls a curated set
+  cell_lef_glob: sky130_fd_sc_hd/latest/cells
+  lib_ff_relative: sky130_fd_sc_hd/latest/timing/sky130_fd_sc_hd__ff_100C_1v95.lib
+  openlane_config_relative: openlane/configuration
+
+# Checkpoints
+checkpoint:
+  enabled: true
+  dir: checkpoints

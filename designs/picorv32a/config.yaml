@@ -1,0 +1,32 @@
+# PicoRV32a challenge-run overrides (global-route fidelity).
+# Full default step_budget is impractical at ~15k nets.
+
+routing:
+  grid_pitch_um: 2.5
+  step_budget: 6000
+  congestion_weight: 2.0
+  pattern_routing: true
+  overflow_passes: 2
+
+placement:
+  iterations: 40
+  die_utilization: 0.55
+  seed: 42
+  density_bins: 16
+  wirelength_weight: 1.0
+  density_weight: 0.35
+  nesterov_decay: 0.9
+  io_pull: 0.02
+
+cts:
+  max_fanout: 24
+  max_levels: 8
+
+report:
+  layout_images: true
+  layout_max_segments: 80000
+
+sta:
+  setup_ns: 0.05
+  hold_ns: 0.02
+  uncertainty_ns: 0.1
