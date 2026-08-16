@@ -29,7 +29,7 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 
 ## What you get
 
-| Stage | Built-in engine (inspired by, not a clone of) |
+| Stage | Built-in engine |
 |---|---|
 | Floorplan / IO | Die estimate + port ring |
 | Power | Core ring + straps + met1 follow-pin (`pdngen`) |
