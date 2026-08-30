@@ -31,7 +31,11 @@ layout_view*.json
 # Generated medium fixture (optional; recreate with scripts/generate_medium_netlist.py)
 tests/fixtures/medium_design.v
 
-# OS / editors
+# Yosys synth scratch next to a GLN
+**/sky130_hd_*.lib
+**/_rtl_*
+*.yosys.log
+*.ys
 .DS_Store
 Thumbs.db
 .idea/

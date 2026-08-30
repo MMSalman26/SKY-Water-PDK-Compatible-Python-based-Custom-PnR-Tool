@@ -18,6 +18,9 @@ dependencies = [
   "PyYAML==6.0.2",
 ]
 
+[project.optional-dependencies]
+synth = ["yowasp-yosys"]
+
 [project.scripts]
 pnr-tool = "pnr_tool.__main__:main"
 

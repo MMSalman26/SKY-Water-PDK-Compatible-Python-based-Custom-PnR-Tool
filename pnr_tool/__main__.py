@@ -12,6 +12,7 @@ from pnr_tool.pdk.fetch import fetch_pdk, pdk_ready
 from pnr_tool.pipeline.batch import build_scoreboard_from_runs, run_batch, write_scoreboard
 from pnr_tool.pipeline.run import StageError, run_pipeline
 from pnr_tool.report.html_report import find_qor_files, generate_from_runs, load_reports, write_html_report
+from pnr_tool.synth import SynthError, run_yosys_synth
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
     p_score = sub.add_parser("scoreboard", help="Rebuild scoreboard.csv from existing *.qor.json")
     p_score.add_argument("--runs", type=Path, required=True, help="Directory to scan")
     p_score.add_argument("--out", type=Path, default=None, help="Output CSV (default: <runs>/scoreboard.csv)")
+
+    p_synth = sub.add_parser("synth", help="Yosys: RTL Verilog → sky130_fd_sc_hd gate-level netlist")
+    p_synth.add_argument("--rtl", type=Path, nargs="+", required=True, help="RTL Verilog file(s)")
+    p_synth.add_argument("--top", type=str, default=None, help="Top module (default: last module in first file)")
+    p_synth.add_argument("--out", type=Path, default=None, help="Output gate-level Verilog")
+    p_synth.add_argument("--config", type=Path, default=None)
+    p_synth.add_argument("--yosys", type=str, default=None, help="Yosys binary (default: yosys or yowasp-yosys)")
+    p_synth.add_argument("--no-fetch", action="store_true")
 
     p_html = sub.add_parser("html-report", help="Build an HTML dashboard from QoR JSON runs")
     p_html.add_argument(
@@ -163,6 +172,25 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         path = write_scoreboard(rows, out)
         print(f"Wrote {len(rows)} row(s) -> {path}")
+        return 0
+
+    if args.cmd == "synth":
+        try:
+            result = run_yosys_synth(
+                args.rtl if len(args.rtl) > 1 else args.rtl[0],
+                top=args.top,
+                out=args.out,
+                config_path=args.config,
+                yosys=args.yosys,
+                fetch_if_missing=not args.no_fetch,
+            )
+        except (SynthError, FileNotFoundError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        print(f"Top: {result['top']}")
+        print(f"GLN: {result['netlist']}")
+        print(f"Cells: {', '.join(result['cells']) or '—'}")
+        print(f"Log: {result['log']}")
         return 0
 
     if args.cmd == "html-report":

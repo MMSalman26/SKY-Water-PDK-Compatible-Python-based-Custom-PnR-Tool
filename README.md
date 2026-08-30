@@ -1,6 +1,6 @@
 # SkyWater-compatible Python PnR tool
 
-Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`sky130_fd_sc_hd`). You can benchmark your own placement, CTS, and routing algorithms against a fixed data contract, or run the built-in OpenROAD-inspired engines on a gate-level netlist.
+Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`sky130_fd_sc_hd`). Optional **Yosys synthesis** maps RTL Verilog to a `sky130_fd_sc_hd` gate-level netlist; then you can benchmark placement, CTS, and routing against a fixed data contract, or run the built-in OpenROAD-inspired engines.
 
 **Repo:** [MMSalman26/SKY-Water-PDK-Compatible-Python-based-Custom-PnR-Tool](https://github.com/MMSalman26/SKY-Water-PDK-Compatible-Python-based-Custom-PnR-Tool)
 
@@ -12,18 +12,19 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 2. [Requirements](#requirements)
 3. [Step-by-step: install](#step-by-step-install)
 4. [Step-by-step: fetch the PDK](#step-by-step-fetch-the-pdk)
-5. [Step-by-step: run the bundled designs](#step-by-step-run-the-bundled-designs)
-6. [Step-by-step: run your own netlist](#step-by-step-run-your-own-netlist)
-7. [Step-by-step: plug in your own algorithms](#step-by-step-plug-in-your-own-algorithms)
-8. [Step-by-step: batch experiments](#step-by-step-batch-experiments)
-9. [Outputs](#outputs)
-10. [Config knobs](#config-knobs)
-11. [CLI reference](#cli-reference)
-12. [Tests](#tests)
-13. [Architecture](#architecture)
-14. [References](#references)
-15. [Limitations](#limitations)
-16. [License](#license)
+5. [Step-by-step: synthesize RTL](#step-by-step-synthesize-rtl)
+6. [Step-by-step: run the bundled designs](#step-by-step-run-the-bundled-designs)
+7. [Step-by-step: run your own netlist](#step-by-step-run-your-own-netlist)
+8. [Step-by-step: plug in your own algorithms](#step-by-step-plug-in-your-own-algorithms)
+9. [Step-by-step: batch experiments](#step-by-step-batch-experiments)
+10. [Outputs](#outputs)
+11. [Config knobs](#config-knobs)
+12. [CLI reference](#cli-reference)
+13. [Tests](#tests)
+14. [Architecture](#architecture)
+15. [References](#references)
+16. [Limitations](#limitations)
+17. [License](#license)
 
 ---
 
@@ -31,6 +32,7 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 
 | Stage | Built-in engine |
 |---|---|
+| Synthesis | Optional Yosys: RTL → `sky130_fd_sc_hd` gate-level netlist (`python -m pnr_tool synth`) |
 | Floorplan / IO | Die estimate + port ring |
 | Power | Core ring + straps + met1 follow-pin (`pdngen`) |
 | Placement | Density + wirelength global place, Abacus-style legalize (`RePlAce` / `OpenDP`) |
@@ -44,6 +46,7 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 Bundled designs:
 
 - **ALU** — OpenLane gate-level 32-bit ALU (`designs/alu/ALU.v`), ~10 s runtime, 10 ns clock.
+- **4:1 MUX** — tiny RTL example (`designs/mux41/mux41.v`); synth to GLN with `python -m pnr_tool synth`.
 - **PicoRV32a** — OpenLane-synthesized PicoRV32 (`designs/picorv32a/`), ~15k logic cells; allow ~15–40 min (DRC dominates).
 
 PDK LEF/liberty files are **downloaded on first use**, not stored in git.
@@ -57,11 +60,12 @@ PDK LEF/liberty files are **downloaded on first use**, not stored in git.
 - Network once, to fetch SkyWater cell LEF/liberty JSON
 - ~2 GB disk for the PDK cache after `fetch-pdk`
 
-Optional (only for the compare harnesses, not required to run PnR):
+Optional:
 
-- [OpenSTA](https://github.com/The-OpenROAD-Project/OpenSTA)
-- [OpenROAD](https://github.com/The-OpenROAD-Project/OpenROAD) (`analyze_power_grid`)
-- [ngspice](https://github.com/imr/ngspice)
+- [Yosys](https://github.com/YosysHQ/yosys) on PATH, or `pip install yowasp-yosys` — for `python -m pnr_tool synth`
+- [OpenSTA](https://github.com/The-OpenROAD-Project/OpenSTA) — compare harness only
+- [OpenROAD](https://github.com/The-OpenROAD-Project/OpenROAD) (`analyze_power_grid`) — compare harness only
+- [ngspice](https://github.com/imr/ngspice) — compare harness only
 
 ---
 
@@ -129,7 +133,27 @@ python -m pnr_tool fetch-pdk --netlist path/to/your.v
 
 `--netlist` can be repeated. `--force` re-downloads. Missing optional files (404) are skipped.
 
-`run` calls fetch automatically unless you pass `--no-fetch`.
+`run` calls fetch automatically unless you pass `--no-fetch`. So does `synth`.
+
+---
+
+## Step-by-step: synthesize RTL
+
+PnR still starts from a **gate-level** `sky130_fd_sc_hd` netlist. If you have behavioral RTL, map it first:
+
+```bash
+# Yosys on PATH, or:  pip install yowasp-yosys
+python -m pnr_tool fetch-pdk
+python -m pnr_tool synth --rtl designs/mux41/mux41.v --top mux41 --out designs/mux41/mux41.gl.v
+```
+
+That writes a structural netlist (the 4:1 MUX example becomes one `sky130_fd_sc_hd__mux4_1`). Then:
+
+```bash
+python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-period-ns 10 --out runs/mux41
+```
+
+`pip install 'pnr-tool[synth]'` (or `pip install yowasp-yosys`) installs a portable Yosys if you do not have OSS CAD Suite.
 
 ---
 
@@ -143,6 +167,14 @@ python -m pnr_tool html-report
 ```
 
 Windows: use `designs\alu\ALU.v` and `runs\alu` if you prefer backslashes.
+
+### 4:1 MUX (RTL → GLN)
+
+```bash
+pip install yowasp-yosys   # skip if yosys is on PATH
+python -m pnr_tool synth --rtl designs/mux41/mux41.v --top mux41 --out designs/mux41/mux41.gl.v
+python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-period-ns 10 --out runs/mux41
+```
 
 ### PicoRV32a (tens of minutes)
 
@@ -178,15 +210,25 @@ Per-run files: `runs/<name>/*.qor.json`, layout PNGs, `layout_view.json`, plus `
 
 The front-end wants **structural gate-level Verilog** mapped to `sky130_fd_sc_hd__*` cells (Yosys / OpenLane / similar). RTL-only files will not place.
 
-### 1. Synthesize (example: OpenLane or Yosys)
+### 1. Synthesize with this tool (Yosys)
 
-Produce a netlist whose instances look like:
+RTL is not placeable until it is mapped to `sky130_fd_sc_hd`. Use the bundled Yosys front-end (native `yosys` on PATH, or `pip install yowasp-yosys`):
 
-```verilog
-sky130_fd_sc_hd__inv_2 u0 (.A(a), .Y(y), .VGND(VGND), .VPWR(VPWR));
+```bash
+python -m pnr_tool fetch-pdk
+pip install yowasp-yosys   # skip if `yosys` is already on PATH
+
+# Example: 4:1 MUX RTL → gate-level netlist
+python -m pnr_tool synth --rtl designs/mux41/mux41.v --top mux41 --out designs/mux41/mux41.gl.v
 ```
 
-Power pins (`VGND`, `VPWR`, `VNB`, `VPB`) and fill/tap/decap cells are stripped automatically. You can also start from a flattened Yosys netlist without power pins.
+Then PnR that GLN:
+
+```bash
+python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-period-ns 10 --out runs/mux41
+```
+
+OpenLane or a standalone Yosys install also work; the netlist should instantiate `sky130_fd_sc_hd__*` cells. Power pins and fill/tap/decap are stripped automatically.
 
 ### 2. Fetch cells used by that file
 
@@ -332,6 +374,8 @@ Override via `--config my.yaml`. Useful keys (see `pnr_tool/config/defaults.yaml
 | `ir_drop.corner` | `tt` 1.8 V / `ff` 1.95 V / `ss` 1.60 V |
 | `ir_drop.coupled` | Optional coupled VDD+VSS MNA |
 | `ir_drop.write_spice` | Write `*_ir.sp` |
+| `synth.yosys` | Yosys binary; `null` = `yosys` then `yowasp-yosys` |
+| `synth.liberty_corner` | Liberty JSON corner used to build the ABC mapping `.lib` |
 | `placement.die_utilization` | Floorplan density |
 | `routing.step_budget` | Maze-search cap (lower = faster, more fallbacks) |
 | `report.layout_images` | Stage PNGs |
@@ -342,6 +386,9 @@ Override via `--config my.yaml`. Useful keys (see `pnr_tool/config/defaults.yaml
 
 ```text
 python -m pnr_tool fetch-pdk [--force] [--cache DIR] [--netlist PATH ...]
+
+python -m pnr_tool synth --rtl FILE [FILE ...]
+    [--top NAME] [--out GL.v] [--yosys BIN] [--no-fetch]
 
 python -m pnr_tool run --netlist PATH
     [--top NAME] [--config PATH] [--out DIR]
@@ -372,7 +419,7 @@ Needs the venv packages. PDK fetch is not required for golden tests. Pico elabor
 ## Architecture
 
 ```text
-netlist.v  →  elaborate  →  DesignObject
+RTL .v  →  Yosys synth (optional)  →  GL .v  →  elaborate  →  DesignObject
                               │
          floorplan / pdngen / place / tap / decap / CTS / route
                               │
@@ -387,6 +434,7 @@ netlist.v  →  elaborate  →  DesignObject
 | `pnr_tool/algorithms/` | Place / CTS / route / power / tap |
 | `pnr_tool/checkers/` | DRC, STA, IR |
 | `pnr_tool/pdk/fetch.py` | Download LEF/liberty |
+| `pnr_tool/synth/` | Optional Yosys RTL → SkyWater GLN |
 | `pnr_tool/config/defaults.yaml` | Defaults |
 | `pnr_tool/report/` | QoR, HTML, CIF, SPEF, layout |
 
@@ -407,7 +455,8 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 | open_pdks | https://github.com/fossi-foundation/open-pdks | Tech install layout / config paths |
 | Magic | https://github.com/RTimothyEdwards/magic | DRC *ideas*; not called |
 | KLayout | https://github.com/KLayout/klayout | DRC *ideas*; not called |
-| Yosys | https://github.com/YosysHQ/yosys | Typical synthesizer for input netlists |
+| Yosys | https://github.com/YosysHQ/yosys | RTL → SkyWater HD GLN (`pnr_tool synth`) |
+| YoWASP Yosys | https://pypi.org/project/yowasp-yosys/ | Optional pip-installable Yosys |
 
 ### OpenROAD engines (algorithm references)
 
@@ -441,7 +490,7 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 
 | Design | URL | Notes |
 |---|---|---|
-| 32-bit ALU netlist | https://github.com/HafizMutahirAhmed/ASIC-ALU-OpenLane | `designs/alu/ALU.v` |
+| 4:1 MUX RTL | `designs/mux41/mux41.v` | Example for `pnr_tool synth` |
 | PicoRV32 RTL | https://github.com/YosysHQ/picorv32 | ISC; RISC-V core |
 | PicoRV32a GL netlist | https://github.com/ABHIMR1502/Digital-SoC-Design | `DAY1/picorv32a.synthesis.v` |
 

@@ -128,6 +128,11 @@ report:
   layout_size_in: 8.0
   layout_max_segments: 200000
 
+# Yosys RTL → SkyWater HD gate-level netlist (optional; needs yosys or yowasp-yosys)
+synth:
+  yosys: null                 # path or command; null = yosys, then yowasp-yosys
+  liberty_corner: tt_025C_1v80
+
 # PDK cache (relative to package root unless absolute)
 pdk:
   cache_dir: data
