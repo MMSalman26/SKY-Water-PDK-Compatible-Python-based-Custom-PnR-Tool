@@ -61,11 +61,25 @@ def _ys_script(
     liberty: Path,
     out_v: Path,
     extra_cmds: Sequence[str] = (),
+    skip_dfflibmap: bool = False,
+    basic_gate_map: Optional[Path] = None,
 ) -> str:
     reads = "\n".join(f'read_verilog -sv "{p.as_posix()}"' for p in rtl_files)
     extra = "\n".join(extra_cmds)
     lib = liberty.as_posix()
     out = out_v.as_posix()
+    if basic_gate_map is not None:
+        mp = basic_gate_map.as_posix()
+        map_pass = f"""synth -top {top} -flatten -noabc -nofsm -noshare -noalumacc
+simplemap
+techmap -map "{mp}"
+opt_clean -purge
+"""
+    else:
+        dff = "" if skip_dfflibmap else f'\ndfflibmap -liberty "{lib}"'
+        map_pass = f"""synth -top {top} -flatten{dff}
+abc -liberty "{lib}"
+"""
     return f"""# pnr-tool Yosys script (SkyWater HD mapping)
 {reads}
 hierarchy -check -top {top}
@@ -74,10 +88,7 @@ flatten
 opt_expr
 opt_clean
 {extra}
-synth -top {top} -flatten
-dfflibmap -liberty "{lib}"
-abc -liberty "{lib}"
-setundef -zero
+{map_pass}setundef -zero
 splitnets
 opt_clean -purge
 stat
@@ -118,7 +129,11 @@ def run_yosys_synth(
 
     corner = str(synth_cfg.get("liberty_corner") or TT_CORNER)
     liberty = out_v.parent / f"sky130_hd_{corner}.lib"
-    write_mapping_liberty(cache, liberty, corner=corner)
+    raw_pfx = synth_cfg.get("mapping_prefixes")
+    allow_prefixes: Optional[List[str]] = None
+    if raw_pfx:
+        allow_prefixes = [str(p) for p in raw_pfx if str(p).strip()]
+    write_mapping_liberty(cache, liberty, corner=corner, allow_prefixes=allow_prefixes)
 
     local_rtl: List[Path] = []
     for i, p in enumerate(rtl_files):
@@ -126,7 +141,20 @@ def run_yosys_synth(
         dest.write_text(p.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
         local_rtl.append(Path(dest.name))
 
-    script = _ys_script(local_rtl, top_name, Path(liberty.name), Path(out_v.name))
+    map_copy: Optional[Path] = None
+    if allow_prefixes:
+        src_map = Path(__file__).with_name("basic_gates.map.v")
+        map_copy = out_v.parent / "basic_gates.map.v"
+        map_copy.write_text(src_map.read_text(encoding="utf-8"), encoding="utf-8")
+
+    script = _ys_script(
+        local_rtl,
+        top_name,
+        Path(liberty.name),
+        Path(out_v.name),
+        skip_dfflibmap=bool(allow_prefixes),
+        basic_gate_map=Path(map_copy.name) if map_copy else None,
+    )
     script_path = out_v.parent / f"{top_name}.ys"
     script_path.write_text(script, encoding="utf-8")
 

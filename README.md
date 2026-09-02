@@ -49,6 +49,7 @@ Bundled designs:
 
 - **ALU** — OpenLane gate-level 32-bit ALU (`designs/alu/ALU.v`), ~10 s runtime, 10 ns clock.
 - **4:1 MUX** — tiny RTL example (`designs/mux41/mux41.v`); synth to GLN with `python -m pnr_tool synth`.
+- **4×4 matmul** — combinational 2-bit matrix multiply (`designs/matmul44/`); synth only, basic gates, ≤1500 instances.
 - **PicoRV32a** — OpenLane-synthesized PicoRV32 (`designs/picorv32a/`), ~15k logic cells; allow ~15–40 min (DRC dominates).
 
 PDK LEF/liberty files are **downloaded on first use**, not stored in git.
@@ -197,6 +198,14 @@ pip install yowasp-yosys   # skip if yosys is on PATH
 python -m pnr_tool synth --rtl designs/mux41/mux41.v --top mux41 --out designs/mux41/mux41.gl.v
 python -m pnr_tool dft --netlist designs/mux41/mux41.gl.v --top mux41 --out runs/mux41/mux41.dft.v
 python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-period-ns 10 --out runs/mux41
+```
+
+### 4×4 matmul (synth only)
+
+Combinational 2-bit matrix multiply. ABC maps to `inv`/`and2`/`or2`/`nand2`/`nor2`/`xor2`/`xnor2` only. No DFT, no PnR.
+
+```bash
+python -m pnr_tool synth --rtl designs/matmul44/matmul44.v --top matmul44 --config designs/matmul44/config.yaml --out designs/matmul44/matmul44.gl.v
 ```
 
 ### PicoRV32a (tens of minutes)
@@ -399,6 +408,7 @@ Override via `--config my.yaml`. Useful keys (see `pnr_tool/config/defaults.yaml
 | `ir_drop.write_spice` | Write `*_ir.sp` |
 | `synth.yosys` | Yosys binary; `null` = `yosys` then `yowasp-yosys` |
 | `synth.liberty_corner` | Liberty JSON corner used to build the ABC mapping `.lib` |
+| `synth.mapping_prefixes` | Optional ABC cell-stem allowlist (`inv`, `nand2`, …) |
 | `dft.enable` | Scan-replace before place and stitch after place (`run --dft`) |
 | `dft.max_length` | Max bits per scan chain |
 | `dft.max_chains` | Cap on number of chains (wins over `max_length` if set) |
@@ -523,6 +533,7 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 | Design | URL | Notes |
 |---|---|---|
 | 4:1 MUX RTL | `designs/mux41/mux41.v` | Example for `pnr_tool synth`; combinational DFT no-op |
+| 4×4 matmul RTL | `designs/matmul44/matmul44.v` | Combinational 2-bit matmul; basic-gate synth |
 | PicoRV32 RTL | https://github.com/YosysHQ/picorv32 | ISC; RISC-V core |
 | PicoRV32a GL netlist | https://github.com/ABHIMR1502/Digital-SoC-Design | `DAY1/picorv32a.synthesis.v` |
 

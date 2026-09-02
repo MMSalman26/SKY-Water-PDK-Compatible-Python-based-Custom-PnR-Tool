@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 from pnr_tool.pdk.fetch import TT_CORNER
 from pnr_tool.pdk.lib_parser import _pin_name
@@ -69,12 +69,32 @@ def _iter_json_cells(cache_dir: Path, corner: str) -> Iterable[tuple[str, dict]]
         yield _cell_stem_from_json_path(path), data
 
 
+def _cell_body(name: str) -> str:
+    return name.split("__", 1)[-1] if "__" in name else name
+
+
+def _prefix_allowed(body: str, allow_prefixes: Optional[Sequence[str]]) -> bool:
+    if not allow_prefixes:
+        return True
+    for raw in allow_prefixes:
+        p = str(raw)
+        if body == p or body.startswith(p + "_"):
+            return True
+    return False
+
+
 def write_mapping_liberty(
     cache_dir: Path,
     dest: Path,
     corner: str = TT_CORNER,
+    allow_prefixes: Optional[Sequence[str]] = None,
 ) -> Path:
-    """Write a combinational+DFF liberty ABC can map against."""
+    """Write a combinational+DFF liberty ABC can map against.
+
+    ``allow_prefixes`` limits cells to those whose stem (after
+    ``sky130_fd_sc_hd__``) starts with one of the strings, e.g.
+    ``inv``, ``nand2``. Sequential cells are omitted when this is set.
+    """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -98,10 +118,14 @@ def write_mapping_liberty(
     ]
     n_cells = 0
     for name, data in _iter_json_cells(cache_dir, corner):
-        body = name.split("__", 1)[-1] if "__" in name else name
+        body = _cell_body(name)
         if any(body.startswith(p) for p in _SKIP_PREFIXES):
             continue
+        if not _prefix_allowed(body, allow_prefixes):
+            continue
         ff = _ff_group(data)
+        if allow_prefixes and ff:
+            continue
         pins: Dict[str, Any] = {}
         for key, val in data.items():
             pname = _pin_name(key)

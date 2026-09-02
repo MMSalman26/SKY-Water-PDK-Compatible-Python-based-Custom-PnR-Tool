@@ -26,3 +26,6 @@ pnr-tool = "pnr_tool.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["pnr_tool*"]
+
+[tool.setuptools.package-data]
+"pnr_tool.synth" = ["*.map.v"]

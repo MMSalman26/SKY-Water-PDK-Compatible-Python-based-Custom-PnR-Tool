@@ -36,6 +36,7 @@ tests/fixtures/medium_design.v
 **/_rtl_*
 *.yosys.log
 *.ys
+designs/**/basic_gates.map.v
 .DS_Store
 Thumbs.db
 .idea/

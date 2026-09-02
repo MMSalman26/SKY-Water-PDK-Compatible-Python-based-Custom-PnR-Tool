@@ -132,6 +132,7 @@ report:
 synth:
   yosys: null                 # path or command; null = yosys, then yowasp-yosys
   liberty_corner: tt_025C_1v80
+  mapping_prefixes: null      # e.g. [inv, and2, nand2]; null = full HD mapping set
 
 # DFT: scan replace + chain stitch (OpenROAD dft ideas). Not ATPG / signoff.
 dft:

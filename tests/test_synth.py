@@ -44,7 +44,7 @@ def test_find_yosys_or_skip():
 
 
 @pytest.mark.skipif(not MUX_RTL.is_file(), reason="mux41 RTL missing")
-def test_mux41_synth_if_yosys():
+def test_mux41_synth_if_yosys(tmp_path):
     try:
         find_yosys()
     except FileNotFoundError:

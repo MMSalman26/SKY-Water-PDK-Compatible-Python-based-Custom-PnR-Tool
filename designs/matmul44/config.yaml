@@ -1,0 +1,10 @@
+# Optional Yosys mapping: only 2-input AND/OR/NOT/NAND/NOR/XOR/XNOR.
+synth:
+  mapping_prefixes:
+    - inv
+    - and2
+    - or2
+    - nand2
+    - nor2
+    - xor2
+    - xnor2
