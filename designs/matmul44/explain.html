@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How a 4×4 matmul becomes RTL</title>
+  <style>
+    :root {
+      --ink: #0b1220;
+      --panel: #1a2433;
+      --line: #3d4d66;
+      --cream: #f6f1e8;
+      --muted: #c5bdb0;
+      --cyan: #6eebf0;
+      --amber: #ffc14a;
+      --rose: #f08a70;
+      --cell: #121a28;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--ink); color: var(--cream); font-family: "Segoe UI", "Helvetica Neue", sans-serif; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body { line-height: 1.55; font-size: 17px; }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; color: #ffe08a; font-size: 0.95em; }
+
+    .topbar {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+      padding: 12px 28px;
+      background: #0b1220;
+      border-bottom: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    }
+    .topbar a {
+      color: var(--muted); font-size: 12px; letter-spacing: .08em;
+      text-transform: uppercase; padding: 8px 12px; border-radius: 8px;
+      text-decoration: none; font-weight: 600;
+    }
+    .topbar a:hover { color: var(--cream); background: var(--panel); text-decoration: none; }
+    .topbar a.on { color: var(--ink); background: var(--cyan); }
+
+    main { margin: 0; }
+    section.act {
+      padding: 28px 40px 40px;
+      border-bottom: 1px solid var(--line);
+      display: flex; flex-direction: column; justify-content: flex-start; gap: 18px;
+      scroll-margin-top: 88px;
+    }
+    .kicker { color: var(--cyan); letter-spacing: .22em; font-size: 12px; text-transform: uppercase; font-weight: 700; }
+    h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 560; letter-spacing: -.03em; line-height: 1.1; }
+    h2 { font-size: clamp(26px, 3vw, 36px); font-weight: 560; letter-spacing: -.02em; }
+    h3 { color: var(--cream); }
+    .lede { max-width: 760px; color: var(--cream); font-size: 18px; }
+    #act2 { padding-top: 16px; padding-bottom: 28px; }
+    #act2 .card { padding: 14px 16px; }
+    .row { display: grid; gap: 24px; align-items: start; }
+    .row.two { grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); }
+    .row.eq { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px;
+    }
+    .caption { color: #ddd6cb; font-size: 16px; margin-top: 10px; }
+
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: transparent; color: var(--cream); border: 1px solid var(--line);
+      border-radius: 999px; padding: 8px 14px; cursor: pointer; font: inherit; font-size: 13px;
+      transition: border-color .2s, color .2s, background .2s;
+    }
+    button:hover { border-color: var(--cyan); color: var(--cyan); }
+    button.primary { background: var(--cyan); color: var(--ink); border-color: var(--cyan); font-weight: 600; }
+    button.primary:hover { color: var(--ink); }
+    kbd {
+      font: 11px ui-monospace, Consolas, monospace; border: 1px solid var(--line);
+      border-radius: 4px; padding: 1px 5px; color: var(--muted);
+    }
+
+    .grids { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+    .mat { display: grid; grid-template-columns: repeat(4, 52px); gap: 6px; }
+    .mat .lab { grid-column: 1 / -1; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--cyan); margin-bottom: 4px; font-weight: 700; }
+    .cell {
+      height: 52px; border-radius: 10px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+      font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; color: var(--cream); background: var(--cell);
+      cursor: pointer; transition: transform .35s, background .35s, border-color .35s, color .35s;
+    }
+    .cell.rowon { background: rgba(110, 235, 240, .28); border-color: var(--cyan); color: var(--cyan); }
+    .cell.colon { background: rgba(255, 193, 74, .28); border-color: var(--amber); color: var(--amber); }
+    .cell.both { background: rgba(240, 138, 112, .38); border-color: var(--rose); color: var(--cream); transform: scale(1.06); }
+    .cell.pick { background: var(--cyan); border-color: var(--cyan); color: var(--ink); }
+    .cell.hot { animation: pulse 1.1s ease; }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.12); box-shadow: 0 0 0 6px rgba(110,235,240,.18); }
+      100% { transform: scale(1); }
+    }
+
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; min-height: 44px; }
+    .chip {
+      padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); font-size: 15px; font-weight: 600;
+      background: var(--cell); opacity: 0; transform: translateY(8px); animation: pop .45s forwards;
+    }
+    .chip.p { color: var(--amber); border-color: var(--amber); }
+    .chip.eq { color: var(--cyan); border-color: var(--cyan); }
+    @keyframes pop { to { opacity: 1; transform: none; } }
+
+    .eqline { font-size: 20px; font-variant-numeric: tabular-nums; min-height: 32px; color: var(--cream); font-weight: 560; }
+    .eqline em { font-style: normal; color: var(--amber); }
+
+    #pack-grids .mat { grid-template-columns: repeat(4, 44px); gap: 5px; }
+    #pack-grids .cell { height: 44px; font-size: 16px; }
+    .formula {
+      font-size: 19px; line-height: 1.5; color: var(--cream); background: #101826;
+      border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+    }
+    .formula strong { color: var(--amber); font-weight: 700; }
+    .bus-block { margin-top: 8px; }
+    .bus-label { font-size: 15px; font-weight: 700; color: var(--cyan); margin-bottom: 8px; }
+    .bus-ends { display: flex; justify-content: space-between; color: #ddd6cb; font-size: 14px; margin-top: 8px; }
+    .bus { display: flex; flex-direction: column; gap: 6px; max-width: 920px; }
+    .bus-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-items: stretch; }
+    .tile {
+      min-height: 58px; border-radius: 10px; background: var(--cell); border: 1px solid var(--line);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 6px 4px;
+      transition: background .25s, border-color .25s, box-shadow .25s;
+    }
+    .tile .idx { font-size: 13px; color: var(--cream); letter-spacing: .04em; font-weight: 600; }
+    .tile .val { font-size: 20px; font-weight: 700; color: var(--cream); }
+    .tile .bits { font-size: 15px; color: #ffd56a; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .tile.on { background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(110,235,240,.35); }
+    .tile.on .idx, .tile.on .val, .tile.on .bits { color: var(--ink); }
+    .tile.cwide .val { font-size: 15px; }
+
+    .flow { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+    .node {
+      flex: 1; min-width: 120px; border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+      background: var(--cell); opacity: 1; color: var(--muted);
+      transition: border-color .4s, background .4s, color .4s;
+    }
+    .node.on { border-color: var(--cyan); background: rgba(110,235,240,.16); color: var(--cream); }
+    .node h3 { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); font-weight: 700; }
+    .node .val { font-size: 22px; margin-top: 8px; font-variant-numeric: tabular-nums; color: var(--amber); font-weight: 700; }
+    .node .sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .arrow { align-self: center; color: var(--cream); font-size: 22px; opacity: .7; }
+
+    .gatebox { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+    .g {
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 8px; text-align: center; font-size: 13px;
+      color: var(--muted); background: var(--cell);
+      transition: color .35s, border-color .35s, background .35s;
+    }
+    .g.on { color: var(--ink); background: var(--amber); border-color: var(--amber); font-weight: 700; }
+
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .tabs button.on { background: var(--cyan); color: var(--ink); border-color: var(--cyan); }
+    pre.code {
+      font: 13.5px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+      background: #0a1018; border: 1px solid var(--line); border-radius: 12px;
+      padding: 14px 0; overflow: auto; max-height: 62vh; color: var(--cream);
+    }
+    pre.code .ln {
+      display: grid; grid-template-columns: 42px 1fr; gap: 10px; padding: 1px 14px;
+      border-left: 3px solid transparent;
+    }
+    pre.code .ln .n { color: #8a96aa; text-align: right; user-select: none; }
+    pre.code .ln.hi { background: rgba(110,235,240,.16); border-left-color: var(--cyan); }
+    .kw { color: #9ad4f5; }
+    .num { color: var(--amber); }
+    .cm { color: #9aa6b8; }
+    .id { color: var(--cream); }
+    .op { color: #ff9b82; }
+
+    .gloss { min-height: 140px; }
+    .gloss h3 { font-size: 20px; margin-bottom: 10px; }
+    .mini { font-size: 16px; color: var(--cream); }
+
+    .chart {
+      width: 100%;
+      max-width: 1080px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #0b1220;
+      border: 1px solid var(--line);
+    }
+    .chart img { width: 100%; height: auto; display: block; background: #0b1220; }
+
+    .hero-meta { display: flex; gap: 28px; color: var(--muted); font-size: 14px; margin-top: 8px; flex-wrap: wrap; }
+    .hero-meta b { color: var(--cream); font-weight: 600; display: block; font-size: 18px; }
+
+    @media (max-width: 1100px) {
+      .row.two, .row.eq { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 980px) {
+      section.act { padding: 28px 16px 40px; }
+      .topbar { padding: 8px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="topbar" aria-label="Sections">
+    <a href="#act0" data-act="act0" class="on">Intro</a>
+    <a href="#act1" data-act="act1">Overview</a>
+    <a href="#act2" data-act="act2">Packing</a>
+    <a href="#act3" data-act="act3">Datapath</a>
+    <a href="#act4" data-act="act4">RTL</a>
+    <a href="#act5" data-act="act5">Gates</a>
+  </nav>
+
+  <main>
+    <section class="act" id="act0">
+      <p class="kicker">SkyWater HD  ·  combinational RTL</p>
+      <h1>A 4×4 multiply<br>you can see.</h1>
+      <p class="lede">
+        Before a synthesizer turns Verilog into gates, the idea is school arithmetic:
+        every output cell is one row dotted with one column. This page animates that idea,
+        then walks the real <code>matmul44.v</code> the same way the hardware does it —
+        with AND, OR, and XOR. No clocks. No flip-flops.
+      </p>
+      <div class="hero-meta">
+        <div><b>2-bit</b> elements (0–3)</div>
+        <div><b>6-bit</b> results (max 36)</div>
+        <div><b>1,408</b> mapped cells</div>
+      </div>
+    </section>
+
+    <section class="act" id="act1">
+      <p class="kicker">Act 1</p>
+      <h2>One cell = one row · one column</h2>
+      <p class="lede">C[i][j] is the sum of four products. Click a result cell, or press play and watch the machine visit every pair.</p>
+      <div class="row two">
+        <div class="card">
+          <div class="controls" style="margin-bottom:16px">
+            <button class="primary" id="ov-play">Play</button>
+            <button id="ov-step">Step</button>
+            <button id="ov-reset">Reset</button>
+            <span class="caption" style="margin:0">Keyboard <kbd>←</kbd> <kbd>→</kbd> while this section is in view</span>
+          </div>
+          <div class="grids" id="grids"></div>
+          <div class="chips" id="chips"></div>
+          <p class="eqline" id="eqline">Click C, or press Play.</p>
+          <p class="caption">Demo numbers are fixed so you can check the arithmetic by hand. Elements stay in 0…3, exactly like 2-bit unsigned RTL.</p>
+        </div>
+        <div class="card">
+          <p class="kicker">Why these widths</p>
+          <h3 style="margin:8px 0 12px">2 bits in, 6 bits out</h3>
+          <p class="mini">Largest element is 3. Four products, each at most 3×3 = 9. Their sum is at most 36, which fits in 6 bits. The chip never waits on a clock: every multiply and add is just wires and gates.</p>
+          <p class="mini" style="margin-top:14px">That is why the ports are packed buses, not sixteen separate pins per matrix — next section.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="act" id="act2">
+      <p class="kicker">Act 2</p>
+      <h2>How 16 numbers become one bus</h2>
+      <p class="lede">
+        The chip does not have 16 pins for A. It has one 32-bit wire <code>a[31:0]</code>.
+        Each matrix cell owns two bits. Click Play and watch that slice light up on the bus.
+      </p>
+      <div class="controls">
+        <button class="primary" id="pk-play">Play</button>
+        <button id="pk-step">Step</button>
+        <button id="pk-reset">Reset</button>
+        <span class="caption" style="margin:0">Keyboard <kbd>←</kbd> <kbd>→</kbd> here too</span>
+      </div>
+      <div class="card">
+        <div class="formula" id="pack-cap">
+          <strong>A[0][0] = 1</strong> lives in bits <strong>a[1:0]</strong>.
+        </div>
+        <div class="tabs" id="bus-tabs" style="margin-top:14px">
+          <button type="button" class="on" data-bus="a">a / b · 2 bits</button>
+          <button type="button" data-bus="c">c · 6 bits</button>
+        </div>
+        <div class="bus-block" id="bus-a-wrap">
+          <div class="bus-label">a[31:0] — each tile is one A cell (b[31:0] uses the same map)</div>
+          <div class="bus" id="bus-a"></div>
+          <div class="bus-ends"><span>Each row of tiles is one matrix row.</span><span>A[0][0] → bits 1:0</span></div>
+        </div>
+        <div class="bus-block" id="bus-c-wrap" hidden>
+          <div class="bus-label">c[95:0] — each tile is one C cell, 6 bits wide</div>
+          <div class="bus" id="bus-c"></div>
+          <div class="bus-ends"><span>Same 4×4 layout as the matrix.</span><span>C[0][0] → bits 5:0</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="grids" id="pack-grids"></div>
+        <p class="caption">Click A, B, or C to jump the bus to that cell.</p>
+      </div>
+      <div>
+        <div class="chart">
+          <img src="explain_assets/packing.svg" alt="Port packing: 2-bit A/B tiles and 6-bit C tiles" />
+        </div>
+        <p class="caption">Same packing as a picture: four row-blocks on each bus, then the three slice formulas.</p>
+      </div>
+    </section>
+
+    <section class="act" id="act3">
+      <p class="kicker">Act 3</p>
+      <h2>Inside one C[0][0]</h2>
+      <p class="lede">The generate loop instantiates this datapath sixteen times. Play it for the demo’s first output cell.</p>
+      <div class="controls">
+        <button class="primary" id="dp-play">Play</button>
+        <button id="dp-step">Step</button>
+        <button id="dp-reset">Reset</button>
+      </div>
+      <div class="flow" id="flow"></div>
+      <div class="row eq">
+        <div class="card">
+          <p class="kicker">mul2</p>
+          <p class="mini">2×2 array multiply. Partial products are ANDs; half-adders are XOR + AND. Product 0…9 in 4 bits.</p>
+          <div class="gatebox" id="mul-gates"></div>
+        </div>
+        <div class="card">
+          <p class="kicker">add_rc bit i</p>
+          <p class="mini">Ripple carry. Propagate p = x⊕y, generate g = x∧y, sum = p⊕cin, carry = g ∨ (p ∧ cin).</p>
+          <div class="gatebox" id="add-gates"></div>
+        </div>
+      </div>
+      <div class="chart">
+        <img src="explain_assets/adder_widths.svg" alt="Bit-width staircase from 2-bit slices through 6-bit C" />
+      </div>
+    </section>
+
+    <section class="act" id="act4">
+      <p class="kicker">Act 4</p>
+      <h2>The RTL, in the order it is written</h2>
+      <p class="lede">Each step lights the matching lines and restates them in English. This is the file the synthesizer reads.</p>
+      <div class="controls" style="margin-bottom:8px">
+        <button class="primary" id="rtl-play">Play</button>
+        <button id="rtl-prev">Prev</button>
+        <button id="rtl-next">Next</button>
+        <span class="caption" style="margin:0" id="rtl-idx"></span>
+      </div>
+      <div class="tabs" id="rtl-tabs"></div>
+      <div class="row two">
+        <pre class="code" id="rtl-code"></pre>
+        <div class="card gloss">
+          <h3 id="rtl-title"> </h3>
+          <p class="mini" id="rtl-body"></p>
+          <p class="caption" id="rtl-link"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="act" id="act5">
+      <p class="kicker">Act 5</p>
+      <h2>What Yosys actually emitted</h2>
+      <p class="lede">No flip-flops, so a scan chain would have nothing to stitch. Stop after synth — this design is a teaching netlist, not a PnR run.</p>
+      <div class="chart">
+        <img src="explain_assets/instances.svg" alt="After Yosys: 752 AND, 512 XOR, 144 OR — 1408 cells, no flip-flops" />
+      </div>
+      <p class="caption">
+        752 AND + 512 XOR + 144 OR = 1,408 cells.
+        Rebuild with
+        <code>python -m pnr_tool synth --rtl designs/matmul44/matmul44.v --top matmul44 --config designs/matmul44/config.yaml --out designs/matmul44/matmul44.gl.v</code>
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const A = [
+      [1, 2, 3, 0],
+      [2, 1, 0, 3],
+      [0, 3, 1, 2],
+      [3, 0, 2, 1],
+    ];
+    const B = [
+      [1, 2, 0, 3],
+      [1, 0, 3, 2],
+      [2, 3, 1, 0],
+      [3, 1, 2, 1],
+    ];
+    const C = A.map((row, i) => row.map((_, j) =>
+      row.reduce((s, _, k) => s + A[i][k] * B[k][j], 0)
+    ));
+
+    function matEl(id, M, name, kind) {
+      const wrap = document.createElement("div");
+      wrap.className = "mat";
+      wrap.innerHTML = `<div class="lab">${name}</div>`;
+      M.forEach((row, i) => row.forEach((v, j) => {
+        const d = document.createElement("div");
+        d.className = "cell";
+        d.dataset.r = i; d.dataset.c = j; d.dataset.kind = kind;
+        d.textContent = kind === "C" ? "·" : v;
+        d.title = `${name}[${i}][${j}]`;
+        wrap.appendChild(d);
+      }));
+      document.getElementById(id).appendChild(wrap);
+      return wrap;
+    }
+
+    const grids = document.getElementById("grids");
+    grids.innerHTML = "";
+    const wrapA = document.createElement("div"); wrapA.id = "gridA"; grids.appendChild(wrapA);
+    const wrapB = document.createElement("div"); wrapB.id = "gridB"; grids.appendChild(wrapB);
+    const wrapC = document.createElement("div"); wrapC.id = "gridC"; grids.appendChild(wrapC);
+    matEl("gridA", A, "A  (2-bit)", "A");
+    matEl("gridB", B, "B  (2-bit)", "B");
+    matEl("gridC", C, "C  (6-bit)", "C");
+
+    function cellsOf(kind) {
+      return [...document.querySelectorAll(`#grids .cell[data-kind="${kind}"]`)];
+    }
+    function clearHL() {
+      document.querySelectorAll("#grids .cell").forEach(el => {
+        el.classList.remove("rowon", "colon", "both", "hot");
+      });
+    }
+    function showPair(i, j, reveal) {
+      clearHL();
+      cellsOf("A").forEach(el => { if (+el.dataset.r === i) el.classList.add("rowon"); });
+      cellsOf("B").forEach(el => { if (+el.dataset.c === j) el.classList.add("colon"); });
+      const cEl = cellsOf("C").find(el => +el.dataset.r === i && +el.dataset.c === j);
+      if (cEl) cEl.classList.add("both", "hot");
+      const chips = document.getElementById("chips");
+      chips.innerHTML = "";
+      const parts = [];
+      for (let k = 0; k < 4; k++) {
+        const p = A[i][k] * B[k][j];
+        parts.push(p);
+        const ch = document.createElement("div");
+        ch.className = "chip p";
+        ch.style.animationDelay = (k * 0.08) + "s";
+        ch.textContent = `${A[i][k]}×${B[k][j]} = ${p}`;
+        chips.appendChild(ch);
+      }
+      const sum = parts.reduce((a, b) => a + b, 0);
+      const eq = document.createElement("div");
+      eq.className = "chip eq";
+      eq.style.animationDelay = "0.4s";
+      eq.textContent = `C[${i}][${j}] = ${parts.join(" + ")} = ${sum}`;
+      chips.appendChild(eq);
+      document.getElementById("eqline").innerHTML =
+        `Row ${i} of A · column ${j} of B  →  <em>C[${i}][${j}] = ${sum}</em>`;
+      if (reveal && cEl) {
+        cEl.textContent = sum;
+        cEl.classList.add("done");
+      }
+    }
+
+    let ovTimer = null, ovIdx = 0, ovPlaying = false;
+    function ovGo(step) {
+      const i = Math.floor(ovIdx / 4), j = ovIdx % 4;
+      showPair(i, j, true);
+      ovIdx = (ovIdx + step + 16) % 16;
+    }
+    document.getElementById("ov-play").onclick = () => {
+      ovPlaying = !ovPlaying;
+      document.getElementById("ov-play").textContent = ovPlaying ? "Pause" : "Play";
+      if (ovPlaying) {
+        ovGo(0);
+        ovTimer = setInterval(() => { ovIdx = (ovIdx + 1) % 16; ovGo(0); }, 1600);
+      } else clearInterval(ovTimer);
+    };
+    document.getElementById("ov-step").onclick = () => { ovGo(1); };
+    document.getElementById("ov-reset").onclick = () => {
+      ovPlaying = false; clearInterval(ovTimer);
+      document.getElementById("ov-play").textContent = "Play";
+      ovIdx = 0; clearHL();
+      cellsOf("C").forEach(el => { el.textContent = "·"; el.classList.remove("done"); });
+      document.getElementById("chips").innerHTML = "";
+      document.getElementById("eqline").textContent = "Click C, or press Play.";
+    };
+    document.getElementById("gridC").addEventListener("click", e => {
+      const el = e.target.closest(".cell");
+      if (!el) return;
+      ovIdx = +el.dataset.r * 4 + +el.dataset.c;
+      showPair(+el.dataset.r, +el.dataset.c, true);
+    });
+
+    /* packing */
+    const pg = document.getElementById("pack-grids");
+    pg.innerHTML = "";
+    ["packA","packB","packC"].forEach(id => {
+      const d = document.createElement("div"); d.id = id; pg.appendChild(d);
+    });
+    matEl("packA", A, "A", "A");
+    matEl("packB", B, "B", "B");
+    matEl("packC", C, "C", "C");
+    document.querySelectorAll("#packC .cell").forEach((el, n) => {
+      const i = Math.floor(n / 4), j = n % 4;
+      el.textContent = C[i][j];
+    });
+
+    const busA = document.getElementById("bus-a");
+    const busC = document.getElementById("bus-c");
+    function bits2(n) { return n.toString(2).padStart(2, "0"); }
+    function fillBus(el, kind) {
+      el.innerHTML = "";
+      for (let r = 0; r < 4; r++) {
+        const row = document.createElement("div");
+        row.className = "bus-row";
+        for (let c = 0; c < 4; c++) {
+          const t = r * 4 + c;
+          const b = document.createElement("div");
+          b.className = "tile" + (kind === "C" ? " cwide" : "");
+          b.dataset.t = t;
+          if (kind === "A") {
+            const lo = t * 2, hi = lo + 1;
+            b.innerHTML = `<span class="idx">A[${r}][${c}]</span><span class="val">${bits2(A[r][c])}</span><span class="bits">a[${hi}:${lo}]</span>`;
+          } else {
+            const lo = t * 6, hi = lo + 5;
+            b.innerHTML = `<span class="idx">C[${r}][${c}]</span><span class="val">${C[r][c]}</span><span class="bits">c[${hi}:${lo}]</span>`;
+          }
+          row.appendChild(b);
+        }
+        el.appendChild(row);
+      }
+    }
+    fillBus(busA, "A");
+    fillBus(busC, "C");
+    function tileAt(el, t) {
+      return el.querySelector(`.tile[data-t="${t}"]`);
+    }
+    function showBus(which) {
+      document.getElementById("bus-a-wrap").hidden = which !== "a";
+      document.getElementById("bus-c-wrap").hidden = which !== "c";
+      document.querySelectorAll("#bus-tabs button").forEach(b => b.classList.toggle("on", b.dataset.bus === which));
+    }
+    document.getElementById("bus-tabs").onclick = e => {
+      const b = e.target.closest("button");
+      if (b) showBus(b.dataset.bus);
+    };
+    function packClear() {
+      document.querySelectorAll("#pack-grids .cell").forEach(el => el.classList.remove("pick"));
+      document.querySelectorAll("#bus-a .tile, #bus-c .tile").forEach(el => el.classList.remove("on"));
+    }
+    function lightBus(kind, r, c) {
+      packClear();
+      const t = r * 4 + c;
+      document.querySelectorAll(`#pack-grids .cell[data-kind="${kind}"]`).forEach(el => {
+        if (+el.dataset.r === r && +el.dataset.c === c) el.classList.add("pick");
+      });
+      const cap = document.getElementById("pack-cap");
+      if (kind === "A") {
+        showBus("a");
+        tileAt(busA, t).classList.add("on");
+        const lo = r * 8 + c * 2;
+        cap.innerHTML = `<strong>A[${r}][${c}] = ${A[r][c]}</strong> (binary ${bits2(A[r][c])}) lives in <strong>a[${lo+1}:${lo}]</strong><br><code>a[${r}*8 + ${c}*2 +: 2]</code> — two bits, row-major.`;
+      } else if (kind === "B") {
+        showBus("a");
+        tileAt(busA, t).classList.add("on");
+        const lo = r * 8 + c * 2;
+        cap.innerHTML = `<strong>B[${r}][${c}] = ${B[r][c]}</strong> uses the same tiling on the other input: <strong>b[${lo+1}:${lo}]</strong><br><code>b[${r}*8 + ${c}*2 +: 2]</code>`;
+      } else {
+        showBus("c");
+        tileAt(busC, t).classList.add("on");
+        const lo = r * 24 + c * 6;
+        cap.innerHTML = `<strong>C[${r}][${c}] = ${C[r][c]}</strong> lives in <strong>c[${lo+5}:${lo}]</strong><br><code>c[${r}*24 + ${c}*6 +: 6]</code> — six bits, because 36 needs 6 bits.`;
+      }
+    }
+    lightBus("A", 0, 0);
+    document.getElementById("pack-grids").addEventListener("click", e => {
+      const el = e.target.closest(".cell");
+      if (!el) return;
+      const kind = el.dataset.kind;
+      const r = +el.dataset.r, c = +el.dataset.c;
+      packIdx = (kind === "C" ? 16 : 0) + r * 4 + c;
+      lightBus(kind, r, c);
+    });
+    document.getElementById("pack-grids").addEventListener("mouseover", e => {
+      const el = e.target.closest(".cell");
+      if (!el) return;
+      lightBus(el.dataset.kind, +el.dataset.r, +el.dataset.c);
+    });
+
+    let packIdx = 0, packTimer = null, packPlaying = false;
+    const packTour = [];
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) packTour.push(["A", i, j]);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) packTour.push(["C", i, j]);
+    function pkGo(step) {
+      packIdx = (packIdx + step + packTour.length) % packTour.length;
+      const [k, r, c] = packTour[packIdx];
+      lightBus(k, r, c);
+    }
+    document.getElementById("pk-play").onclick = () => {
+      packPlaying = !packPlaying;
+      document.getElementById("pk-play").textContent = packPlaying ? "Pause" : "Play";
+      if (packPlaying) {
+        pkGo(0);
+        packTimer = setInterval(() => pkGo(1), 1200);
+      } else clearInterval(packTimer);
+    };
+    document.getElementById("pk-step").onclick = () => pkGo(1);
+    document.getElementById("pk-reset").onclick = () => {
+      packPlaying = false; clearInterval(packTimer);
+      document.getElementById("pk-play").textContent = "Play";
+      packIdx = 0; lightBus("A", 0, 0);
+    };
+
+    /* datapath C[0][0] */
+    const a0 = A[0], bcol = B.map(row => row[0]);
+    const prods = a0.map((x, k) => x * bcol[k]);
+    const s01 = prods[0] + prods[1];
+    const s012 = s01 + prods[2];
+    const s0123 = s012 + prods[3];
+    const flowSteps = [
+      { title: "slice", nodes: [
+        ["a0..a3", a0.join(", "), "row 0 of A"],
+        ["b0..b3", bcol.join(", "), "col 0 of B"],
+      ]},
+      { title: "mul2 × 4", nodes: [
+        ["p0", String(prods[0]), "1 × 1"],
+        ["p1", String(prods[1]), "2 × 1"],
+        ["p2", String(prods[2]), "3 × 2"],
+        ["p3", String(prods[3]), "0 × 3"],
+      ]},
+      { title: "add W=4", nodes: [["s01", String(s01), "p0 + p1  (5-bit)"]] },
+      { title: "add W=5", nodes: [["s012", String(s012), "s01 + p2  (6-bit)"]] },
+      { title: "add W=6", nodes: [["C[0][0]", String(s0123), "s012 + p3, take [5:0]"]] },
+    ];
+    const flowEl = document.getElementById("flow");
+    function renderFlow(upto) {
+      flowEl.innerHTML = "";
+      flowSteps.forEach((st, si) => {
+        if (si > 0) {
+          const ar = document.createElement("div"); ar.className = "arrow"; ar.textContent = "→";
+          flowEl.appendChild(ar);
+        }
+        const n = document.createElement("div");
+        n.className = "node" + (si <= upto ? " on" : "");
+        n.innerHTML = st.nodes.map(([h,v,s]) =>
+          `<h3>${h}</h3><div class="val">${si <= upto ? v : "—"}</div><div class="sub">${s}</div>`
+        ).join("");
+        flowEl.appendChild(n);
+      });
+      const mg = document.getElementById("mul-gates");
+      const labels = ["x[0]&y[1]", "x[1]&y[0]", "x[1]&y[1]", "x[0]&y[0]", "s1 XOR", "c1 AND", "s2 XOR", "c2 AND"];
+      mg.innerHTML = labels.map((t, i) => `<div class="g${upto >= 1 && i < 8 ? " on" : ""}">${t}</div>`).join("");
+      const ag = document.getElementById("add-gates");
+      const al = ["p = x ⊕ y", "g = x ∧ y", "s = p ⊕ cin", "cin+ = g ∨ (p ∧ cin)"];
+      ag.innerHTML = al.map((t, i) => `<div class="g${upto >= 2 && i < 4 ? " on" : ""}">${t}</div>`).join("");
+    }
+    let dpAt = -1, dpTimer = null, dpPlaying = false;
+    function dpShow(n) {
+      dpAt = Math.max(-1, Math.min(flowSteps.length - 1, n));
+      renderFlow(dpAt);
+    }
+    renderFlow(-1);
+    document.getElementById("dp-play").onclick = () => {
+      dpPlaying = !dpPlaying;
+      document.getElementById("dp-play").textContent = dpPlaying ? "Pause" : "Play";
+      if (dpPlaying) {
+        dpTimer = setInterval(() => {
+          if (dpAt >= flowSteps.length - 1) { dpPlaying = false; clearInterval(dpTimer); document.getElementById("dp-play").textContent = "Play"; return; }
+          dpShow(dpAt + 1);
+        }, 1100);
+      } else clearInterval(dpTimer);
+    };
+    document.getElementById("dp-step").onclick = () => dpShow(dpAt + 1);
+    document.getElementById("dp-reset").onclick = () => {
+      dpPlaying = false; clearInterval(dpTimer);
+      document.getElementById("dp-play").textContent = "Play";
+      dpShow(-1);
+    };
+
+    /* RTL walkthrough */
+    const SRC = {
+      matmul44: `module matmul44 (
+    input  wire [31:0] a,
+    input  wire [31:0] b,
+    output wire [95:0] c
+);
+    genvar gi, gj;
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : rows
+            for (gj = 0; gj < 4; gj = gj + 1) begin : cols
+                wire [1:0] a0, a1, a2, a3;
+                wire [1:0] b0, b1, b2, b3;
+                assign a0 = a[(gi * 8) +: 2];
+                assign a1 = a[(gi * 8) + 2 +: 2];
+                assign a2 = a[(gi * 8) + 4 +: 2];
+                assign a3 = a[(gi * 8) + 6 +: 2];
+                assign b0 = b[(gj * 2) +: 2];
+                assign b1 = b[8 + (gj * 2) +: 2];
+                assign b2 = b[16 + (gj * 2) +: 2];
+                assign b3 = b[24 + (gj * 2) +: 2];
+
+                wire [3:0] p0, p1, p2, p3;
+                mul2 u_m0 (.x(a0), .y(b0), .p(p0));
+                mul2 u_m1 (.x(a1), .y(b1), .p(p1));
+                mul2 u_m2 (.x(a2), .y(b2), .p(p2));
+                mul2 u_m3 (.x(a3), .y(b3), .p(p3));
+
+                wire [4:0] s01;
+                wire [5:0] s012;
+                wire [6:0] s0123;
+                add_rc #(.W(4)) u_a0 (.x(p0), .y(p1), .s(s01));
+                add_rc #(.W(5)) u_a1 (.x(s01), .y({1'b0, p2}), .s(s012));
+                add_rc #(.W(6)) u_a2 (.x(s012), .y({2'b00, p3}), .s(s0123));
+                assign c[(gi * 24) + (gj * 6) +: 6] = s0123[5:0];
+            end
+        end
+    endgenerate
+endmodule`,
+      mul2: `module mul2 (
+    input  wire [1:0] x,
+    input  wire [1:0] y,
+    output wire [3:0] p
+);
+    wire pp01, pp10, pp11, s1, c1, s2, c2;
+    assign pp01 = x[0] & y[1];
+    assign pp10 = x[1] & y[0];
+    assign pp11 = x[1] & y[1];
+    assign s1 = pp01 ^ pp10;
+    assign c1 = pp01 & pp10;
+    assign s2 = pp11 ^ c1;
+    assign c2 = pp11 & c1;
+    assign p = {c2, s2, s1, x[0] & y[0]};
+endmodule`,
+      add_rc: `module add_rc #(
+    parameter W = 4
+) (
+    input  wire [W-1:0] x,
+    input  wire [W-1:0] y,
+    output wire [W:0]   s
+);
+    wire [W:0] cin;
+    wire [W-1:0] p, g;
+    assign cin[0] = 1'b0;
+    genvar i;
+    generate
+        for (i = 0; i < W; i = i + 1) begin : bits
+            assign p[i] = x[i] ^ y[i];
+            assign g[i] = x[i] & y[i];
+            assign s[i] = p[i] ^ cin[i];
+            assign cin[i+1] = g[i] | (p[i] & cin[i]);
+        end
+    endgenerate
+    assign s[W] = cin[W];
+endmodule`,
+    };
+
+    const STEPS = [
+      { mod: "matmul44", lines: [1, 2, 3, 4, 5], title: "The chip has three buses", body: "Two 32-bit inputs pack sixteen 2-bit matrix elements each. The 96-bit output packs sixteen 6-bit results. There is no clock port — this module is combinational." },
+      { mod: "matmul44", lines: [6, 7, 8, 9], title: "Sixteen copies, not a loop in time", body: "gi is the result row, gj the result column. generate unrolls 4×4 = 16 independent datapaths. Hardware does them all at once." },
+      { mod: "matmul44", lines: [10, 11, 12, 13, 14, 15], title: "Unpack row i of A", body: "Row gi starts at bit gi×8. Each element is a 2-bit indexed part-select +: 2. a0 is A[gi][0], a3 is A[gi][3]." },
+      { mod: "matmul44", lines: [16, 17, 18, 19], title: "Unpack column j of B", body: "B[k][gj] lives at bit k×8 + gj×2. b0 is row 0 of that column, b3 is row 3. Together with a0…a3 these are the four pairs that will be multiplied." },
+      { mod: "matmul44", lines: [21, 22, 23, 24, 25], title: "Four 2×2 multipliers", body: "Each mul2 turns two 2-bit numbers into a 4-bit product (0…9). For C[0][0] in the demo that is 1, 2, 6, 0." },
+      { mod: "matmul44", lines: [27, 28, 29, 30], title: "Add the first two products", body: "add_rc #(.W(4)) adds two 4-bit values and returns 5 bits. p0+p1 cannot exceed 18." },
+      { mod: "matmul44", lines: [31], title: "Bring in p2", body: "{1'b0, p2} zero-extends the third product to 5 bits. The adder is now 5-bit and the sum is 6 bits." },
+      { mod: "matmul44", lines: [32], title: "Bring in p3", body: "{2'b00, p3} zero-extends the last product to 6 bits. Max total 36 still fits in 6 bits of the 7-bit sum." },
+      { mod: "matmul44", lines: [33], title: "Pack C[gi][gj]", body: "Only s0123[5:0] is kept. It is written into c at bit gi×24 + gj×6 — the 6-bit tile you hovered in Act 2." },
+      { mod: "mul2", lines: [1, 2, 3, 4, 5], title: "mul2 ports", body: "Two 2-bit unsigned numbers in, one 4-bit product out. No * operator — the array multiplier is written with AND and XOR." },
+      { mod: "mul2", lines: [7, 8, 9], title: "Partial products", body: "pp01 = x[0]∧y[1], pp10 = x[1]∧y[0], pp11 = x[1]∧y[1]. The missing pp00 = x[0]∧y[0] is used later as the LSB." },
+      { mod: "mul2", lines: [10, 11], title: "First half-adder", body: "s1 = pp01 ⊕ pp10 is product bit 1. c1 = pp01 ∧ pp10 is the carry into bit 2." },
+      { mod: "mul2", lines: [12, 13, 14], title: "Second half-adder and concat", body: "s2/c2 add pp11 to that carry. The product is {c2, s2, s1, x[0]∧y[0]} — bits 3 down to 0. Example: 2×3 → 6." },
+      { mod: "add_rc", lines: [1, 2, 3, 4, 5, 6, 7], title: "Parameterized ripple adder", body: "W is 4, then 5, then 6 in the parent. Output is one bit wider than the inputs so the carry-out has a home." },
+      { mod: "add_rc", lines: [8, 9, 10], title: "Carry in is zero", body: "cin[0] is tied to 0. p and g are per-bit propagate and generate — the same names as in a textbook adder." },
+      { mod: "add_rc", lines: [14, 15], title: "Propagate and generate", body: "p[i] = x[i] ⊕ y[i] (XOR). g[i] = x[i] ∧ y[i] (AND). These two wires are the entire bitwise arithmetic." },
+      { mod: "add_rc", lines: [16, 17], title: "Sum and ripple", body: "s[i] = p[i] ⊕ cin[i]. The next carry is g ∨ (p ∧ cin) — OR of generate and (propagate AND previous carry). No + operator." },
+      { mod: "add_rc", lines: [20], title: "Final carry is the extra bit", body: "s[W] is cin[W], the carry out of the last bit. The parent discards bit 6 on the last adder because 36 fits in 6 bits." },
+    ];
+
+    function esc(s) {
+      return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+    function colorize(line) {
+      let t = esc(line);
+      t = t.replace(/(\/\/.*)$/g, '<span class="cm">$1</span>');
+      t = t.replace(/\b(module|endmodule|input|output|wire|assign|generate|endgenerate|for|begin|end|genvar|parameter)\b/g, '<span class="kw">$1</span>');
+      t = t.replace(/\b(\d+'[bhd][0-9a-fA-FxX]+|\d+)\b/g, '<span class="num">$1</span>');
+      t = t.replace(/([&|^~])/g, '<span class="op">$1</span>');
+      return t;
+    }
+
+    let rtlI = 0, rtlTimer = null, rtlPlaying = false;
+    function renderCode(mod, hi) {
+      const lines = SRC[mod].split("\n");
+      const set = new Set(hi);
+      document.getElementById("rtl-code").innerHTML = lines.map((ln, i) => {
+        const n = i + 1;
+        return `<div class="ln${set.has(n) ? " hi" : ""}"><span class="n">${n}</span><span>${colorize(ln)}</span></div>`;
+      }).join("");
+      const first = [...set][0];
+      if (first) {
+        const el = document.getElementById("rtl-code").children[first - 1];
+        if (el) el.scrollIntoView({ block: "nearest" });
+      }
+    }
+    function showRtl(i) {
+      rtlI = (i + STEPS.length) % STEPS.length;
+      const st = STEPS[rtlI];
+      renderCode(st.mod, st.lines);
+      document.getElementById("rtl-title").textContent = st.title;
+      document.getElementById("rtl-body").textContent = st.body;
+      document.getElementById("rtl-link").textContent = `module ${st.mod}  ·  step ${rtlI + 1} / ${STEPS.length}`;
+      document.getElementById("rtl-idx").textContent = `${rtlI + 1} / ${STEPS.length}`;
+      document.querySelectorAll("#rtl-tabs button").forEach(b => b.classList.toggle("on", b.dataset.mod === st.mod));
+    }
+    const tabs = document.getElementById("rtl-tabs");
+    ["matmul44", "mul2", "add_rc"].forEach(m => {
+      const b = document.createElement("button");
+      b.textContent = m;
+      b.dataset.mod = m;
+      b.onclick = () => {
+        const idx = STEPS.findIndex(s => s.mod === m);
+        if (idx >= 0) showRtl(idx);
+      };
+      tabs.appendChild(b);
+    });
+    showRtl(0);
+    document.getElementById("rtl-next").onclick = () => showRtl(rtlI + 1);
+    document.getElementById("rtl-prev").onclick = () => showRtl(rtlI - 1);
+    document.getElementById("rtl-play").onclick = () => {
+      rtlPlaying = !rtlPlaying;
+      document.getElementById("rtl-play").textContent = rtlPlaying ? "Pause" : "Play";
+      if (rtlPlaying) {
+        rtlTimer = setInterval(() => {
+          if (rtlI >= STEPS.length - 1) {
+            rtlPlaying = false; clearInterval(rtlTimer);
+            document.getElementById("rtl-play").textContent = "Play";
+            return;
+          }
+          showRtl(rtlI + 1);
+        }, 2200);
+      } else clearInterval(rtlTimer);
+    };
+
+    /* topbar + keyboard */
+    const acts = [...document.querySelectorAll("section.act")];
+    const rail = [...document.querySelectorAll(".topbar a")];
+    const vis = new IntersectionObserver(entries => {
+      const hit = entries
+        .filter(en => en.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!hit) return;
+      rail.forEach(a => a.classList.toggle("on", a.dataset.act === hit.target.id));
+    }, { threshold: [0.15, 0.35, 0.6], rootMargin: "-80px 0px -45% 0px" });
+    acts.forEach(a => vis.observe(a));
+
+    function inView(id) {
+      const el = document.getElementById(id);
+      const r = el.getBoundingClientRect();
+      return r.top < innerHeight * 0.55 && r.bottom > innerHeight * 0.35;
+    }
+    document.addEventListener("keydown", e => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const dir = e.key === "ArrowRight" ? 1 : -1;
+      if (inView("act1")) { ovGo(dir === 1 ? 1 : 15); e.preventDefault(); }
+      else if (inView("act2")) { pkGo(dir); e.preventDefault(); }
+      else if (inView("act3")) { dpShow(dpAt + dir); e.preventDefault(); }
+      else if (inView("act4")) { showRtl(rtlI + dir); e.preventDefault(); }
+    });
+
+    function pinHash() {
+      const id = location.hash.replace("#", "");
+      const el = id && document.getElementById(id);
+      if (!el) return;
+      const y = el.getBoundingClientRect().top + window.scrollY - 56;
+      window.scrollTo({ top: Math.max(0, y), behavior: "auto" });
+    }
+    window.addEventListener("hashchange", () => setTimeout(pinHash, 40));
+    setTimeout(pinHash, 80);
+  </script>
+</body>
+</html>

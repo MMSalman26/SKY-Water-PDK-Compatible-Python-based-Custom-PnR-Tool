@@ -49,7 +49,7 @@ Bundled designs:
 
 - **ALU** — OpenLane gate-level 32-bit ALU (`designs/alu/ALU.v`), ~10 s runtime, 10 ns clock.
 - **4:1 MUX** — tiny RTL example (`designs/mux41/mux41.v`); synth to GLN with `python -m pnr_tool synth`.
-- **4×4 matmul** — combinational 2-bit matrix multiply (`designs/matmul44/`); synth only, basic gates, ≤1500 instances.
+- **4×4 matmul** — combinational 2-bit matrix multiply (`designs/matmul44/`); synth only, basic gates, ≤1500 instances. Animated explainer: `designs/matmul44/explain.html`.
 - **PicoRV32a** — OpenLane-synthesized PicoRV32 (`designs/picorv32a/`), ~15k logic cells; allow ~15–40 min (DRC dominates).
 
 PDK LEF/liberty files are **downloaded on first use**, not stored in git.
@@ -202,7 +202,7 @@ python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-pe
 
 ### 4×4 matmul (synth only)
 
-Combinational 2-bit matrix multiply. ABC maps to `inv`/`and2`/`or2`/`nand2`/`nor2`/`xor2`/`xnor2` only. No DFT, no PnR.
+Combinational 2-bit matrix multiply. Mapped to AND/OR/XOR (and the other basic gates). No DFT, no PnR. Open the animated explainer at [`designs/matmul44/explain.html`](designs/matmul44/explain.html) (`python -m http.server 8000 --directory designs/matmul44`).
 
 ```bash
 python -m pnr_tool synth --rtl designs/matmul44/matmul44.v --top matmul44 --config designs/matmul44/config.yaml --out designs/matmul44/matmul44.gl.v
