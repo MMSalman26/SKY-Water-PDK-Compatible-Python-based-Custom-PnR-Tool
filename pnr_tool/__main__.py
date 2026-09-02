@@ -12,6 +12,7 @@ from pnr_tool.pdk.fetch import fetch_pdk, pdk_ready
 from pnr_tool.pipeline.batch import build_scoreboard_from_runs, run_batch, write_scoreboard
 from pnr_tool.pipeline.run import StageError, run_pipeline
 from pnr_tool.report.html_report import find_qor_files, generate_from_runs, load_reports, write_html_report
+from pnr_tool.dft import DftError, insert_dft
 from pnr_tool.synth import SynthError, run_yosys_synth
 
 
@@ -42,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-layout-images",
         action="store_true",
         help="Skip per-stage layout PNG rendering (enabled by default)",
+    )
+    p_run.add_argument(
+        "--dft",
+        action="store_true",
+        help="Scan-replace flops before place and stitch chains after place",
     )
     p_run.add_argument(
         "--placement",
@@ -79,6 +85,17 @@ def main(argv: list[str] | None = None) -> int:
     p_synth.add_argument("--config", type=Path, default=None)
     p_synth.add_argument("--yosys", type=str, default=None, help="Yosys binary (default: yosys or yowasp-yosys)")
     p_synth.add_argument("--no-fetch", action="store_true")
+
+    p_dft = sub.add_parser(
+        "dft",
+        help="Scan-replace + stitch scan chains on a sky130_fd_sc_hd gate-level netlist",
+    )
+    p_dft.add_argument("--netlist", type=Path, required=True, help="Gate-level Verilog")
+    p_dft.add_argument("--top", type=str, default=None, help="Top module")
+    p_dft.add_argument("--out", type=Path, default=None, help="Output netlist (default: runs/<top>/<top>.dft.v)")
+    p_dft.add_argument("--config", type=Path, default=None)
+    p_dft.add_argument("--no-stitch", action="store_true", help="Replace flops only; do not stitch chains")
+    p_dft.add_argument("--no-fetch", action="store_true")
 
     p_html = sub.add_parser("html-report", help="Build an HTML dashboard from QoR JSON runs")
     p_html.add_argument(
@@ -118,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
                 placement_algo=args.placement,
                 clock_algo=args.clock_opt,
                 routing_algo=args.routing,
+                dft=True if args.dft else None,
             )
         except PluginLoadError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
@@ -191,6 +209,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"GLN: {result['netlist']}")
         print(f"Cells: {', '.join(result['cells']) or '—'}")
         print(f"Log: {result['log']}")
+        return 0
+
+    if args.cmd == "dft":
+        try:
+            result = insert_dft(
+                args.netlist,
+                top=args.top,
+                out=args.out,
+                config_path=args.config,
+                fetch_if_missing=not args.no_fetch,
+                stitch=not args.no_stitch,
+            )
+        except (DftError, FileNotFoundError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        repl = (result.get("replace") or {}).get("replaced_count", 0)
+        chains = (result.get("stitch") or {}).get("chains") or []
+        print(f"Top: {result['top']}")
+        print(f"GLN: {result['netlist_out']}")
+        print(f"Replaced: {repl}  chains: {len(chains)}" + ("  (unchanged combinational)" if result.get("unchanged") else ""))
+        print(f"Report: {result['report']}")
         return 0
 
     if args.cmd == "html-report":

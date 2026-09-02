@@ -120,7 +120,10 @@ def ensure_cells(library: dict, cell_names: Iterable[str], tech: dict | None = N
             "height": site_h,
             "area": width * site_h,
             "leakage_power": 1e-3,
-            "is_sequential": any(x in name for x in ("dfxtp", "dfrtp", "sdfxtp", "dlxtp")),
+            "is_sequential": any(
+                x in name
+                for x in ("dfxtp", "dfrtp", "dfstp", "dfbb", "sdfxtp", "sdfrtp", "sdfstp", "dlxtp")
+            ),
             "pins": {
                 "A": {"direction": "input", "use": "SIGNAL", "capacitance": 0.002, "is_clock": False, "timing_arcs": [], "rects": []},
                 "Y": {"direction": "output", "use": "SIGNAL", "capacitance": 0.0, "is_clock": False, "timing_arcs": [], "rects": []},

@@ -1,6 +1,6 @@
 # SkyWater-compatible Python PnR tool
 
-Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`sky130_fd_sc_hd`). Optional **Yosys synthesis** maps RTL Verilog to a `sky130_fd_sc_hd` gate-level netlist; then you can benchmark placement, CTS, and routing against a fixed data contract, or run the built-in OpenROAD-inspired engines.
+Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`sky130_fd_sc_hd`). Optional **Yosys synthesis** maps RTL Verilog to a `sky130_fd_sc_hd` gate-level netlist; optional **DFT** replaces flops with scan cells and stitches scan chains. Then you can benchmark placement, CTS, and routing against a fixed data contract, or run the built-in OpenROAD-inspired engines.
 
 **Repo:** [MMSalman26/SKY-Water-PDK-Compatible-Python-based-Custom-PnR-Tool](https://github.com/MMSalman26/SKY-Water-PDK-Compatible-Python-based-Custom-PnR-Tool)
 
@@ -13,18 +13,19 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 3. [Step-by-step: install](#step-by-step-install)
 4. [Step-by-step: fetch the PDK](#step-by-step-fetch-the-pdk)
 5. [Step-by-step: synthesize RTL](#step-by-step-synthesize-rtl)
-6. [Step-by-step: run the bundled designs](#step-by-step-run-the-bundled-designs)
-7. [Step-by-step: run your own netlist](#step-by-step-run-your-own-netlist)
-8. [Step-by-step: plug in your own algorithms](#step-by-step-plug-in-your-own-algorithms)
-9. [Step-by-step: batch experiments](#step-by-step-batch-experiments)
-10. [Outputs](#outputs)
-11. [Config knobs](#config-knobs)
-12. [CLI reference](#cli-reference)
-13. [Tests](#tests)
-14. [Architecture](#architecture)
-15. [References](#references)
-16. [Limitations](#limitations)
-17. [License](#license)
+6. [Step-by-step: insert scan (DFT)](#step-by-step-insert-scan-dft)
+7. [Step-by-step: run the bundled designs](#step-by-step-run-the-bundled-designs)
+8. [Step-by-step: run your own netlist](#step-by-step-run-your-own-netlist)
+9. [Step-by-step: plug in your own algorithms](#step-by-step-plug-in-your-own-algorithms)
+10. [Step-by-step: batch experiments](#step-by-step-batch-experiments)
+11. [Outputs](#outputs)
+12. [Config knobs](#config-knobs)
+13. [CLI reference](#cli-reference)
+14. [Tests](#tests)
+15. [Architecture](#architecture)
+16. [References](#references)
+17. [Limitations](#limitations)
+18. [License](#license)
 
 ---
 
@@ -33,6 +34,7 @@ Pure-Python, in-memory **place-and-route (PnR)** tool for **SkyWater 130 nm** (`
 | Stage | Built-in engine |
 |---|---|
 | Synthesis | Optional Yosys: RTL → `sky130_fd_sc_hd` gate-level netlist (`python -m pnr_tool synth`) |
+| DFT | Optional scan replace + chain stitch (`python -m pnr_tool dft`; OpenROAD `dft` *ideas*) |
 | Floorplan / IO | Die estimate + port ring |
 | Power | Core ring + straps + met1 follow-pin (`pdngen`) |
 | Placement | Density + wirelength global place, Abacus-style legalize (`RePlAce` / `OpenDP`) |
@@ -157,6 +159,26 @@ python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-pe
 
 ---
 
+## Step-by-step: insert scan (DFT)
+
+After synthesis (or on any `sky130_fd_sc_hd` GLN), optional scan insertion follows OpenROAD `dft`: **replace** plain flops (`dfxtp` → `sdfxtp`, etc.) then **stitch** `SCD`/`SCE` into chain(s).
+
+```bash
+python -m pnr_tool dft --netlist designs/mux41/mux41.gl.v --top mux41 --out runs/mux41/mux41.dft.v
+```
+
+The bundled 4:1 MUX is combinational, so that command is a **no-op check**: zero flops replaced, no extra scan ports, netlist copied unchanged. A sequential netlist (ALU, Pico, or any design with `dfxtp`/`dfrtp`) gets `scan_en`, `scan_in_*`, `scan_out_*`.
+
+To run PnR with DFT in the pipeline (replace before place, stitch after place):
+
+```bash
+python -m pnr_tool run --netlist designs/alu/ALU.v --top ALU --dft --clock-period-ns 10 --out runs/alu_dft
+```
+
+This is scan infrastructure only — not ATPG, lockup latches, compression, or manufacturing DFT signoff.
+
+---
+
 ## Step-by-step: run the bundled designs
 
 ### ALU (~1 minute)
@@ -173,6 +195,7 @@ Windows: use `designs\alu\ALU.v` and `runs\alu` if you prefer backslashes.
 ```bash
 pip install yowasp-yosys   # skip if yosys is on PATH
 python -m pnr_tool synth --rtl designs/mux41/mux41.v --top mux41 --out designs/mux41/mux41.gl.v
+python -m pnr_tool dft --netlist designs/mux41/mux41.gl.v --top mux41 --out runs/mux41/mux41.dft.v
 python -m pnr_tool run --netlist designs/mux41/mux41.gl.v --top mux41 --clock-period-ns 10 --out runs/mux41
 ```
 
@@ -376,6 +399,10 @@ Override via `--config my.yaml`. Useful keys (see `pnr_tool/config/defaults.yaml
 | `ir_drop.write_spice` | Write `*_ir.sp` |
 | `synth.yosys` | Yosys binary; `null` = `yosys` then `yowasp-yosys` |
 | `synth.liberty_corner` | Liberty JSON corner used to build the ABC mapping `.lib` |
+| `dft.enable` | Scan-replace before place and stitch after place (`run --dft`) |
+| `dft.max_length` | Max bits per scan chain |
+| `dft.max_chains` | Cap on number of chains (wins over `max_length` if set) |
+| `dft.clock_mixing` | `no_mix` (per clock net) or `clock_mix` |
 | `placement.die_utilization` | Floorplan density |
 | `routing.step_budget` | Maze-search cap (lower = faster, more fallbacks) |
 | `report.layout_images` | Stage PNGs |
@@ -390,11 +417,14 @@ python -m pnr_tool fetch-pdk [--force] [--cache DIR] [--netlist PATH ...]
 python -m pnr_tool synth --rtl FILE [FILE ...]
     [--top NAME] [--out GL.v] [--yosys BIN] [--no-fetch]
 
+python -m pnr_tool dft --netlist PATH
+    [--top NAME] [--out GL.v] [--config PATH] [--no-stitch] [--no-fetch]
+
 python -m pnr_tool run --netlist PATH
     [--top NAME] [--config PATH] [--out DIR]
     [--clock-period-ns FLOAT]
     [--resume-from CHECKPOINT.pkl]
-    [--no-fetch] [--no-layout-images]
+    [--no-fetch] [--no-layout-images] [--dft]
     [--placement SPEC] [--clock-opt SPEC] [--routing SPEC]
 
 python -m pnr_tool batch --manifest experiments.yaml --out DIR
@@ -419,7 +449,7 @@ Needs the venv packages. PDK fetch is not required for golden tests. Pico elabor
 ## Architecture
 
 ```text
-RTL .v  →  Yosys synth (optional)  →  GL .v  →  elaborate  →  DesignObject
+RTL .v  →  Yosys synth (optional)  →  DFT scan (optional)  →  GL .v  →  elaborate  →  DesignObject
                               │
          floorplan / pdngen / place / tap / decap / CTS / route
                               │
@@ -435,6 +465,7 @@ RTL .v  →  Yosys synth (optional)  →  GL .v  →  elaborate  →  DesignObje
 | `pnr_tool/checkers/` | DRC, STA, IR |
 | `pnr_tool/pdk/fetch.py` | Download LEF/liberty |
 | `pnr_tool/synth/` | Optional Yosys RTL → SkyWater GLN |
+| `pnr_tool/dft/` | Optional scan replace + chain stitch |
 | `pnr_tool/config/defaults.yaml` | Defaults |
 | `pnr_tool/report/` | QoR, HTML, CIF, SPEF, layout |
 
@@ -470,6 +501,7 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 | OpenROAD FastRoute (grt) | https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/src/grt | Pin stubs, layer directions |
 | OpenROAD pdn | https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/src/pdn | Rings, straps, follow-pin |
 | OpenROAD psm (PDNSim) | https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/src/psm | Static IR MNA, sources, EM/J |
+| OpenROAD dft | https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/src/dft | Scan replace + chain stitch |
 | PDNSim (standalone) | https://github.com/The-OpenROAD-Project/PDNSim | Archived IR solver |
 | OpenSTA | https://github.com/The-OpenROAD-Project/OpenSTA | NLDM, Elmore, CRPR, SDC |
 | OpenROAD-flow-scripts | https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts | Reference sky130 designs |
@@ -490,7 +522,7 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 
 | Design | URL | Notes |
 |---|---|---|
-| 4:1 MUX RTL | `designs/mux41/mux41.v` | Example for `pnr_tool synth` |
+| 4:1 MUX RTL | `designs/mux41/mux41.v` | Example for `pnr_tool synth`; combinational DFT no-op |
 | PicoRV32 RTL | https://github.com/YosysHQ/picorv32 | ISC; RISC-V core |
 | PicoRV32a GL netlist | https://github.com/ABHIMR1502/Digital-SoC-Design | `DAY1/picorv32a.synthesis.v` |
 
@@ -514,6 +546,7 @@ Algorithms here are **reimplemented in Python** from public papers and OSS tools
 - STA is dual-corner NLDM + Elmore, not CCS / SI / extracted SPEF signoff.
 - Pico DRC can take tens of minutes (width-aware geometry + OBS).
 - Headline DRC uses `pass_on` types; enclosure / min-width / offgrid are reported but may not increment that count.
+- DFT is scan replace + stitch only (no ATPG, lockup latches, compression, JTAG, or manufacturing test signoff). Combinational netlists are unchanged.
 
 ---
 

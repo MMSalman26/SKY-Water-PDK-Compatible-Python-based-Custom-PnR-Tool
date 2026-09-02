@@ -133,6 +133,16 @@ synth:
   yosys: null                 # path or command; null = yosys, then yowasp-yosys
   liberty_corner: tt_025C_1v80
 
+# DFT: scan replace + chain stitch (OpenROAD dft ideas). Not ATPG / signoff.
+dft:
+  enable: false
+  max_length: 200             # bits per chain; null = one chain
+  max_chains: null            # if set, wins over max_length
+  clock_mixing: no_mix        # no_mix | clock_mix
+  scan_enable: scan_en
+  scan_in: scan_in_{}
+  scan_out: scan_out_{}
+
 # PDK cache (relative to package root unless absolute)
 pdk:
   cache_dir: data

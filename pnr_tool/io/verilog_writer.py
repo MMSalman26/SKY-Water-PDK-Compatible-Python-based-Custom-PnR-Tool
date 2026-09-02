@@ -36,6 +36,17 @@ def write_verilog(design: DesignObject, path: Path) -> Path:
         lines.append(f"  wire {_ident(net)};")
         declared.add(net)
     lines.append("")
+    port_home: Dict[str, str] = {}
+    for net, ninfo in design.nets.items():
+        for inst, _pin in ninfo.get("pins") or []:
+            if str(inst).startswith("PORT:"):
+                port_home[str(inst).split(":", 1)[1]] = net
+    for pname in design.ports:
+        home = port_home.get(pname)
+        if home and home != pname:
+            lines.append(f"  assign {_ident(pname)} = {_ident(home)};")
+    if port_home:
+        lines.append("")
     for inst, info in design.cells.items():
         ctype = info.get("cell_type") or "UNKNOWN"
         conns: Dict[str, Any] = dict(info.get("pins") or {})

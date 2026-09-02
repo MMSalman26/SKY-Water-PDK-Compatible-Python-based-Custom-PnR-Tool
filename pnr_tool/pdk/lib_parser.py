@@ -11,7 +11,7 @@ import numpy as np
 
 
 def _is_seq(cell_name: str, data: dict) -> bool:
-    if "dfxtp" in cell_name or "dfrtp" in cell_name or "sdfxtp" in cell_name:
+    if "dfxtp" in cell_name or "dfrtp" in cell_name or "dfstp" in cell_name or "sdfxtp" in cell_name:
         return True
     for key, val in data.items():
         if key.startswith("pin,") and isinstance(val, dict):

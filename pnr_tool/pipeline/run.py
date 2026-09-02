@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -23,7 +24,10 @@ from pnr_tool.design.contracts import (
 )
 from pnr_tool.design.graph import build_timing_graph, infer_drivers, sanity_check
 from pnr_tool.design.object import DesignObject
+from pnr_tool.dft.replace import scan_replace
+from pnr_tool.dft.stitch import stitch_scan
 from pnr_tool.io.verilog_parser import elaborate, parse_verilog_file
+from pnr_tool.io.verilog_writer import write_verilog
 from pnr_tool.pdk.fetch import fetch_pdk, pdk_ready
 from pnr_tool.pdk.loader import ensure_cells, load_library_and_tech
 from pnr_tool.pipeline.memory import MemoryTracker
@@ -53,8 +57,12 @@ def run_pipeline(
     placement_algo: AlgoIn = None,
     clock_algo: AlgoIn = None,
     routing_algo: AlgoIn = None,
+    dft: Optional[bool] = None,
 ) -> Dict[str, Any]:
     config = load_config(config_path)
+    if dft is not None:
+        config.setdefault("dft", {})["enable"] = bool(dft)
+    dft_on = bool((config.get("dft") or {}).get("enable", False))
     if not layout_images:
         config.setdefault("report", {})["layout_images"] = False
     cache = Path(config["pdk"]["cache_dir"])
@@ -92,6 +100,8 @@ def run_pipeline(
         "drc": 0.0,
         "sta": 0.0,
         "ir_drop": 0.0,
+        "dft_replace": 0.0,
+        "dft_stitch": 0.0,
         "total": 0.0,
     }
 
@@ -114,6 +124,21 @@ def run_pipeline(
         ensure_cells(library, used, tech)
         design.library = library
         design.tech = tech
+        if dft_on:
+            t0 = time.perf_counter()
+            repl = scan_replace(design)
+            timing_s["dft_replace"] = time.perf_counter() - t0
+            nrep = int(repl.get("replaced_count") or 0)
+            print(f"DFT scan_replace: {nrep} flop(s) → scan cells")
+            if nrep and fetch_if_missing:
+                scan_v = out_dir / f"{design.name}.scan_replace.v"
+                write_verilog(design, scan_v)
+                fetch_pdk(cache, extra_netlists=[scan_v])
+                library, tech = load_library_and_tech(cache)
+            used = {info["cell_type"] for info in design.cells.values()}
+            ensure_cells(library, used, tech)
+            design.library = library
+            design.tech = tech
         infer_drivers(design)
         warnings = sanity_check(design)
         for w in warnings:
@@ -162,6 +187,26 @@ def run_pipeline(
                 mem.sample()
                 validate_instances(instances, design.die_area)
                 design.instances = instances
+                if dft_on:
+                    t0 = time.perf_counter()
+                    stitched = stitch_scan(design, config)
+                    timing_s["dft_stitch"] = time.perf_counter() - t0
+                    nchain = len(stitched.get("chains") or [])
+                    nscan = int(stitched.get("scan_cells") or 0)
+                    print(f"DFT stitch: {nscan} scan cell(s), {nchain} chain(s)")
+                    infer_drivers(design)
+                    dft_path = out_dir / f"{design.name}.dft.json"
+                    dft_path.write_text(
+                        json.dumps(
+                            {
+                                "replace": design.meta.get("dft_replace"),
+                                "stitch": stitched,
+                                "note": "Scan replace + chain stitch only; not ATPG/signoff.",
+                            },
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
                 assign_port_positions(design)
                 # Rebuild PDN if legalizer expanded the die
                 new_die = tuple(float(v) for v in design.die_area)
